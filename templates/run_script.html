@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Create / Edit Script</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style> body{background:#f8f9fa} .container-card{max-width:900px;margin:30px auto;padding:20px;background:#fff;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,0.06)} </style>
+</head>
+<body>
+<div class="container container-card">
+    <h4>Create / Edit Script</h4>
+    <form method="POST">
+        <div class="mb-3">
+            <label>Script Name</label>
+            <input type="text" name="script_name" class="form-control" value="{{ script_name if script_name is defined else '' }}" required>
+        </div>
+        <div class="mb-3">
+            <label>Script Code</label>
+            <textarea name="code" class="form-control" rows="10" required>{{ code if code is defined else '' }}</textarea>
+        </div>
+        <div class="mb-3">
+            <label>Run Type</label>
+            <select name="run_type" class="form-select">
+                <option value="manual">Manual</option>
+                <option value="scheduled">Scheduled</option>
+                <option value="automated">Automated</option>
+            </select>
+        </div>
+        <button class="btn btn-success">Save Script</button>
+        <a href="{{ url_for('history') }}" class="btn btn-secondary">Back</a>
+    </form>
+</div>
+</body>
+</html>
+
+
+

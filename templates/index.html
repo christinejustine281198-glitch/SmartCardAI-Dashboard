@@ -1,0 +1,27 @@
+
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h2>Welcome, {{ user }}</h2>
+        <p>You are now logged in to the AppScript Clone.</p>
+
+        <h3>Run a Script</h3>
+        <form method="post" action="{{ url_for('run_script') }}">
+            <input type="text" name="script_name" placeholder="Script name" required><br><br>
+            <textarea name="code" rows="10" placeholder="Write JavaScript code here..." required></textarea><br><br>
+            <button type="submit">Run Script</button>
+        </form>
+
+        <p>
+            <a href="{{ url_for('history') }}">📜 View Run History</a> |
+            <a href="{{ url_for('logout') }}">🚪 Logout</a>
+        </p>
+    </div>
+</body>
+</html>
