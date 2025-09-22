@@ -12,8 +12,8 @@ DB_FILE = "app.db"
 # SMTP credentials (Jude-provided)
 SMTP_SERVER = "mail.smartcardai.com"
 SMTP_PORT = 993
-SMTP_USER = "support@smartcardai.com"
-SMTP_PASS = "Smart@Mail2025!"  # ensure exact casing
+SMTP_USER = "your-email@example.com"
+SMTP_PASS = "your-password"  # ensure exact casing
 
 # --- DB init ---
 def init_db():
