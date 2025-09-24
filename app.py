@@ -333,7 +333,7 @@ def get_logs(script_id):
     return jsonify([(row[0] if row[0] is not None else "", row[1]) for row in rows])
 
 # Run
-if  name == "_main_":
+if  __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 5000)) 
     app.run(host="0.0.0.0", port=port, debug=True)
