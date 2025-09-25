@@ -1,19 +1,30 @@
 
+// runner.js
+// Minimal Node.js runner for Flask app
 
-// Simple Node.js runner for JS files
-const fs = require("fs");
-const path = require("path");
+const vm = require("vm");
 
-const filePath = process.argv[2];
-if (!filePath) {
-    console.error("No file provided");
+// Get code from command line
+const code = process.argv[2] || "";
+
+let logs = [];
+let result = null;
+
+// Override console.log to capture logs
+const sandbox = {
+    console: {
+        log: (...args) => logs.push(args.join(" "))
+    }
+};
+
+try {
+    const script = new vm.Script(code);
+    const context = new vm.createContext(sandbox);
+    result = script.runInContext(context);
+} catch (err) {
+    console.error(err.toString());
     process.exit(1);
 }
 
-try {
-    const code = fs.readFileSync(filePath, "utf-8");
-    const result = eval(code);
-    console.log(result);
-} catch (err) {
-    console.error(err);
-}
+// Output JSON
+console.log(JSON.stringify({ logs, result }));
