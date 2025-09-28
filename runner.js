@@ -4,29 +4,28 @@ process.stdin.setEncoding("utf-8");
 process.stdin.on("data", chunk => input += chunk);
 
 process.stdin.on("end", () => {
+  let logs = [];
+  const originalLog = console.log;
+  console.log = (...args) => {
+    logs.push(args.join(" "));
+    originalLog.apply(console, args);
+  };
+
   try {
-    let logs = [];
-    const originalLog = console.log;
+    let result = eval(input); // Executes the input JS code
 
-    // Capture console.log outputs
-    console.log = (...args) => {
-      logs.push(args.join(" "));
-      originalLog.apply(console, args);
-    };
-
-    let result = eval(input);
-
-    // Restore console.log
-    console.log = originalLog;
+    console.log = originalLog; // Restore original console.log
 
     process.stdout.write(JSON.stringify({
       output: logs.join("\n") || (result !== undefined ? result.toString() : ""),
-      error: "NO Error",
+      error: "No error, script executed successfully",
       success: true
     }));
   } catch (err) {
+    console.log = originalLog;
+
     process.stdout.write(JSON.stringify({
-      output: "Please Check The Error Log",
+      output: logs.join("\n") || "please check the error log",
       error: err.message,
       success: false
     }));

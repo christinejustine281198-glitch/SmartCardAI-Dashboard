@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from apscheduler.schedulers.background import BackgroundScheduler
-import sqlite3, os, secrets, subprocess, json, datetime, shutil
+import sqlite3, os, secrets, subprocess, json, datetime, shutil, sys
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
@@ -11,17 +11,19 @@ DB_FILE = os.path.join(os.path.dirname(__file__), "app.db")
 BACKUP_FILE = os.path.join(os.path.dirname(__file__), "app_backup.db")
 
 # -------------------- NODE/NPM PATHS --------------------
-NODE_PATH = r"C:\Program Files\nodejs\node.exe"
-NPM_PATH = r"C:\Program Files\nodejs\npm.cmd"
+if sys.platform.startswith("win"):
+    NODE_PATH = r"C:\Program Files\nodejs\node.exe"
+    NPM_PATH = r"C:\Program Files\nodejs\npm.cmd"
+else:
+    NODE_PATH = shutil.which("node") or "/usr/bin/node"
+    NPM_PATH = shutil.which("npm") or "/usr/bin/npm"
 
-# -------------------- DB FIX ROUTINE --------------------
+# -------------------- DATABASE SETUP --------------------
 def ensure_scripts_table():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    required_cols = [
-        'id','name','code','output','error','success_log','success_code',
-        'timestamp','run_type','user','status'
-    ]
+    required_cols = ['id','name','code','output','error','success_log','success_code',
+                     'timestamp','run_type','user','status']
     c.execute("PRAGMA table_info(scripts)")
     existing_cols = [row[1] for row in c.fetchall()]
 
@@ -48,14 +50,11 @@ def ensure_scripts_table():
     conn.commit()
     conn.close()
 
-# -------------------- DB INIT --------------------
 def init_db():
     if os.path.exists(DB_FILE):
         shutil.copy2(DB_FILE, BACKUP_FILE)
-
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE,
@@ -65,9 +64,7 @@ def init_db():
         terms_accepted_at DATETIME,
         privacy_accepted_at DATETIME
     )''')
-
     ensure_scripts_table()
-
     # Default admin
     c.execute("SELECT * FROM users WHERE username='admin'")
     if not c.fetchone():
@@ -75,7 +72,6 @@ def init_db():
         now = datetime.datetime.now().isoformat()
         c.execute("INSERT INTO users (username,email,password,terms_accepted_at,privacy_accepted_at) VALUES (?,?,?,?,?)",
                   ("admin", "admin@example.com", hashed, now, now))
-
     # Sample script
     c.execute("SELECT COUNT(*) FROM scripts")
     if c.fetchone()[0] == 0:
@@ -125,7 +121,6 @@ def run_node_runner(code):
 def process_script_result(result):
     output = result.stdout.strip() if result.stdout else ""
     error = result.stderr.strip() if result.stderr else ""
-
     try:
         first_brace = output.find("{")
         last_brace = output.rfind("}")
@@ -165,14 +160,10 @@ def run_scheduled_script(script_id):
 scheduler = BackgroundScheduler()
 scheduler.start()
 
-# -------------------- ROUTES --------------------
-@app.route("/")
-def home():
-    return redirect(url_for("history")) if "user" in session else redirect(url_for("login"))
-
+# -------------------- AUTH ROUTES --------------------
 @app.route("/signup", methods=["GET","POST"])
 def signup():
-    if request.method == "POST":
+    if request.method=="POST":
         username = request.form.get("username","").strip()
         email = request.form.get("email","").strip().lower()
         password = request.form.get("password","")
@@ -199,7 +190,7 @@ def signup():
 
 @app.route("/login", methods=["GET","POST"])
 def login():
-    if request.method == "POST":
+    if request.method=="POST":
         identifier = request.form.get("username","").strip()
         password = request.form.get("password","")
         row = query_db("SELECT username,password FROM users WHERE username=? COLLATE NOCASE", (identifier,), one=True)
@@ -260,6 +251,32 @@ def reset_password():
             flash("Invalid reset token", "danger")
     return render_template("reset_password.html")
 
+# -------------------- PACKAGE ROUTES --------------------
+@app.route("/install_package", methods=["POST"])
+def install_package():
+    if "user" not in session:
+        return redirect(url_for("login"))
+    pkg = request.form.get("package","").strip()
+    if not pkg:
+        return jsonify({"status":"error","message":"Package name required"})
+    try:
+        result = subprocess.run([NPM_PATH, "install", pkg], capture_output=True, text=True, cwd=os.path.dirname(__file__))
+        output = result.stdout
+        error = result.stderr
+        status = "success" if result.returncode==0 else "error"
+        return jsonify({"status":status, "output": output, "error": error})
+    except Exception as e:
+        return jsonify({"status":"error", "output":"", "error": str(e)})
+
+@app.route("/list_packages")
+def list_packages():
+    try:
+        result = subprocess.run([NPM_PATH, "ls", "--depth=0"], capture_output=True, text=True, cwd=os.path.dirname(__file__))
+        return jsonify({"status":"success", "output": result.stdout, "error": result.stderr})
+    except Exception as e:
+        return jsonify({"status":"error", "output":"", "error": str(e)})
+
+# -------------------- SCRIPT ROUTES --------------------
 @app.route("/run_script", methods=["GET","POST"])
 def run_script():
     if "user" not in session:
@@ -284,6 +301,39 @@ def history():
         return redirect(url_for("login"))
     scripts = query_db("SELECT id,name,timestamp,run_type,status FROM scripts WHERE user=? ORDER BY id DESC", (session["user"],))
     return render_template("history.html", scripts=scripts)
+
+@app.route("/logs/<int:script_id>")
+def get_logs(script_id):
+    if "user" not in session:
+        return redirect(url_for("login"))
+    log_type = request.args.get("type","output")
+    if log_type not in ("output","error","success_log","success_code"):
+        log_type = "output"
+    rows = query_db(f"SELECT {log_type},timestamp FROM scripts WHERE id=? AND user=?", (script_id, session["user"]))
+    return jsonify([(row[0] if row[0] else "", row[1]) for row in rows])
+
+@app.route("/start/<int:script_id>")
+def start_script(script_id):
+    if "user" not in session:
+        return redirect(url_for("login"))
+    job_id = f"script_{script_id}"
+    if not scheduler.get_job(job_id):
+        scheduler.add_job(run_scheduled_script, "interval", minutes=1, args=[script_id], id=job_id, replace_existing=True)
+    query_db("UPDATE scripts SET status=? WHERE id=? AND user=?", ("running", script_id, session["user"]))
+    flash("Script scheduled", "success")
+    return redirect(url_for("history"))
+
+@app.route("/pause/<int:script_id>")
+def pause_script(script_id):
+    if "user" not in session:
+        return redirect(url_for("login"))
+    job_id = f"script_{script_id}"
+    job = scheduler.get_job(job_id)
+    if job:
+        scheduler.remove_job(job_id)
+    query_db("UPDATE scripts SET status=? WHERE id=? AND user=?", ("paused", script_id, session["user"]))
+    flash("Script paused", "info")
+    return redirect(url_for("history"))
 
 @app.route("/delete/<int:script_id>")
 def delete_script(script_id):
@@ -312,75 +362,10 @@ def edit_script(script_id):
         return redirect(url_for("history"))
     return render_template("edit_script.html", script=script)
 
-@app.route("/start/<int:script_id>")
-def start_script(script_id):
-    if "user" not in session:
-        return redirect(url_for("login"))
-    job_id = f"script_{script_id}"
-    if not scheduler.get_job(job_id):
-        scheduler.add_job(run_scheduled_script, "interval", minutes=1, args=[script_id], id=job_id, replace_existing=True)
-    query_db("UPDATE scripts SET status=? WHERE id=? AND user=?", ("running", script_id, session["user"]))
-    flash("Script scheduled", "success")
-    return redirect(url_for("history"))
-
-@app.route("/pause/<int:script_id>")
-def pause_script(script_id):
-    if "user" not in session:
-        return redirect(url_for("login"))
-    job_id = f"script_{script_id}"
-    job = scheduler.get_job(job_id)
-    if job:
-        scheduler.remove_job(job_id)
-    query_db("UPDATE scripts SET status=? WHERE id=? AND user=?", ("paused", script_id, session["user"]))
-    flash("Script paused", "info")
-    return redirect(url_for("history"))
-
-@app.route("/logs/<int:script_id>")
-def get_logs(script_id):
-    if "user" not in session:
-        return redirect(url_for("login"))
-    log_type = request.args.get("type","output")
-    if log_type not in ("output","error","success_log","success_code"):
-        log_type = "output"
-    rows = query_db(f"SELECT {log_type},timestamp FROM scripts WHERE id=? AND user=?", (script_id, session["user"]))
-    return jsonify([(row[0] if row[0] else "", row[1]) for row in rows])
-
-# -------------------- NPM FEATURES --------------------
-@app.route("/install_lib", methods=["POST"])
-def install_lib():
-    package = request.form.get("package")
-    if not package:
-        return jsonify({"error": "No package specified"}), 400
-    try:
-        result = subprocess.run(
-            [NPM_PATH, "install", package, "--no-audit", "--no-fund"],
-            cwd=os.path.dirname(__file__),
-            capture_output=True,
-            text=True,
-            timeout=300
-        )
-        return jsonify({
-            "output": result.stdout,
-            "error": result.stderr,
-            "status": "success" if result.returncode == 0 else "failed"
-        })
-    except Exception as e:
-        return jsonify({"error": str(e), "status": "failed"}), 500
-
-@app.route("/list_libs", methods=["GET"])
-def list_libs():
-    try:
-        result = subprocess.run(
-            [NPM_PATH, "list", "--depth=0", "--json"],
-            cwd=os.path.dirname(__file__),
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        packages = json.loads(result.stdout).get("dependencies", {})
-        return jsonify(packages)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+# -------------------- HOME --------------------
+@app.route("/")
+def home():
+    return redirect(url_for("history")) if "user" in session else redirect(url_for("login"))
 
 # -------------------- RUN APP --------------------
 if __name__ == "__main__":

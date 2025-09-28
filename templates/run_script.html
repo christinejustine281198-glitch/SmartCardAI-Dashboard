@@ -7,6 +7,14 @@
     <style> body{background:#3c3c3c} .container-card{max-width:900px;margin:30px auto;padding:20px;background:#090909;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,0.06)} </style>
 </head>
 <body>
+
+    <form method="post" action="{{ url_for('install_package') }}" class="d-flex gap-2 mb-3">
+  <input type="text" name="package" placeholder="Package name (e.g. lodash)" class="form-control" required>
+  <button type="submit" class="btn btn-primary">Install package</button>
+  <a href="{{ url_for('list_packages') }}" class="btn btn-secondary">List installed packages</a>
+</form>
+
+
 <div class="container container-card">
     <h4 style="color: rgba(228, 255, 122, 0.952);">Create / Edit Script</h4>
     <form method="POST">
@@ -32,6 +40,3 @@
 </div>
 </body>
 </html>
-
-
-
