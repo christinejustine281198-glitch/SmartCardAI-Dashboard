@@ -1,7 +1,7 @@
 body {
     font-family: Arial, sans-serif;
     margin: 20px;
-    background-color: #f8f9fa;
+    background-color: #6d6e6f;
 }
 h2 {
     color: #101010;
@@ -12,7 +12,7 @@ table {
     margin-top: 20px;
 }
 table, th, td {
-    border: 1px solid #ddd;
+    border: 4px solid #fffef6;
 }
 th, td {
     padding: 10px;
@@ -45,3 +45,4 @@ button:hover {
 textarea {
     width: 100%;
 }
+

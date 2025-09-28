@@ -6,28 +6,27 @@ import sqlite3, os, secrets, subprocess, json, datetime, shutil
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 
-# -------------------- DATABASE CONFIG --------------------
+# -------------------- DATABASE --------------------
 DB_FILE = os.path.join(os.path.dirname(__file__), "app.db")
 BACKUP_FILE = os.path.join(os.path.dirname(__file__), "app_backup.db")
-print("Using DB at:", DB_FILE)
+
+# -------------------- NODE/NPM PATHS --------------------
+NODE_PATH = r"C:\Program Files\nodejs\node.exe"
+NPM_PATH = r"C:\Program Files\nodejs\npm.cmd"
 
 # -------------------- DB FIX ROUTINE --------------------
 def ensure_scripts_table():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-
-    required_cols = ['id','name','code','output','error','success_log','success_code','timestamp','run_type','user','status']
-
-    # Get existing columns
+    required_cols = [
+        'id','name','code','output','error','success_log','success_code',
+        'timestamp','run_type','user','status'
+    ]
     c.execute("PRAGMA table_info(scripts)")
     existing_cols = [row[1] for row in c.fetchall()]
 
-    # If table missing columns, rebuild table
     if not all(col in existing_cols for col in required_cols):
-        print("Fixing scripts table...")
-        # Create temporary new table
-        c.execute('''
-        CREATE TABLE IF NOT EXISTS scripts_new (
+        c.execute('''CREATE TABLE IF NOT EXISTS scripts_new (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
             code TEXT,
@@ -39,34 +38,25 @@ def ensure_scripts_table():
             run_type TEXT,
             user TEXT,
             status TEXT DEFAULT "paused"
-        )
-        ''')
-        # Copy existing data
+        )''')
         copy_cols = [col for col in required_cols if col in existing_cols]
         if copy_cols:
             cols_str = ",".join(copy_cols)
             c.execute(f"INSERT INTO scripts_new ({cols_str}) SELECT {cols_str} FROM scripts")
-        # Replace old table
         c.execute("DROP TABLE IF EXISTS scripts")
         c.execute("ALTER TABLE scripts_new RENAME TO scripts")
-        print("Scripts table fixed successfully.")
-
     conn.commit()
     conn.close()
 
-# -------------------- DB INIT & MIGRATION --------------------
+# -------------------- DB INIT --------------------
 def init_db():
-    # Backup existing DB
     if os.path.exists(DB_FILE):
         shutil.copy2(DB_FILE, BACKUP_FILE)
-        print(f"Backup created: {BACKUP_FILE}")
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
-    # Users table
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS users (
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE,
         email TEXT UNIQUE,
@@ -74,39 +64,28 @@ def init_db():
         reset_token TEXT,
         terms_accepted_at DATETIME,
         privacy_accepted_at DATETIME
-    )
-    ''')
+    )''')
 
-    # Ensure scripts table exists with correct columns
     ensure_scripts_table()
 
-    # Create default admin if not exists
+    # Default admin
     c.execute("SELECT * FROM users WHERE username='admin'")
     if not c.fetchone():
         hashed = generate_password_hash("admin123")
         now = datetime.datetime.now().isoformat()
         c.execute("INSERT INTO users (username,email,password,terms_accepted_at,privacy_accepted_at) VALUES (?,?,?,?,?)",
                   ("admin", "admin@example.com", hashed, now, now))
-        print("Default admin user created: username=admin, password=admin123")
 
-    # Add sample script if scripts table empty
+    # Sample script
     c.execute("SELECT COUNT(*) FROM scripts")
     if c.fetchone()[0] == 0:
         c.execute('''INSERT INTO scripts (name, code, output, error, success_log, success_code, run_type, user, status)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                   ("Hello World", 'console.log("Hello World")', "", "", "", "", "manual", "admin", "paused"))
-        print("Sample script added")
-
     conn.commit()
     conn.close()
-    print("DB initialized and migration complete.")
 
-# Initialize DB
 init_db()
-
-# -------------------- SCHEDULER --------------------
-scheduler = BackgroundScheduler()
-scheduler.start()
 
 # -------------------- HELPERS --------------------
 def query_db(query, args=(), one=False):
@@ -118,14 +97,6 @@ def query_db(query, args=(), one=False):
     conn.close()
     return (rv[0] if rv else None) if one else rv
 
-def run_node_runner(code):
-    try:
-        runner_path = os.path.join(os.path.dirname(__file__), "runner.js")
-        result = subprocess.run(["node", runner_path, code], capture_output=True, text=True, timeout=60)
-        return result.stdout.strip(), result.stderr.strip()
-    except Exception as e:
-        return "", str(e)
-
 def store_script_record(name, code, output, error, success_log, success_code, run_type, user, status):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -136,25 +107,63 @@ def store_script_record(name, code, output, error, success_log, success_code, ru
     conn.commit()
     conn.close()
 
+def run_node_runner(code):
+    try:
+        runner_path = os.path.join(os.path.dirname(__file__), "runner.js")
+        result = subprocess.run(
+            [NODE_PATH, runner_path],
+            input=code,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        return result
+    except Exception as e:
+        class Dummy: stdout=""; stderr=str(e)
+        return Dummy()
+
+def process_script_result(result):
+    output = result.stdout.strip() if result.stdout else ""
+    error = result.stderr.strip() if result.stderr else ""
+
+    try:
+        first_brace = output.find("{")
+        last_brace = output.rfind("}")
+        if first_brace != -1 and last_brace != -1:
+            json_part = output[first_brace:last_brace+1]
+            data = json.loads(json_part)
+        else:
+            raise ValueError("No JSON found in output")
+
+        script_output = data.get("output", "")
+        script_error = data.get("error", "")
+        success = data.get("success", False)
+
+        success_log = "Script executed successfully" if success else "Script failed"
+        success_code = "200" if success else "500"
+
+    except Exception as e:
+        script_output = output
+        script_error = error or str(e)
+        success_log = "Script failed"
+        success_code = "500"
+
+    return script_output, script_error, success_log, success_code
+
 def run_scheduled_script(script_id):
     row = query_db("SELECT name, code, user FROM scripts WHERE id=?", (script_id,), one=True)
     if not row:
         return
     name, code, user = row
-    output, error, success_log, success_code = "", "", "", ""
-    stdout, stderr = run_node_runner(code)
-    try:
-        data = json.loads(stdout) if stdout else {}
-        logs = "\n".join(data.get("logs", [])) if isinstance(data, dict) else ""
-        final = str(data.get("result", "")) if isinstance(data, dict) else ""
-        output = logs + ("\n" + final if final else "")
-        if not stderr:
-            success_log = "Script executed successfully"
-            success_code = "200"
-    except Exception:
-        output = stdout
-        error = stderr
-    store_script_record(name + " (scheduled)", code, output, error, success_log, success_code, "cron", user, "running")
+    result = run_node_runner(code)
+    output, error, success_log, success_code = process_script_result(result)
+    store_script_record(
+        name + " (scheduled)", code, output, error, success_log, success_code, "cron", user, "running"
+    )
+
+# -------------------- SCHEDULER --------------------
+scheduler = BackgroundScheduler()
+scheduler.start()
 
 # -------------------- ROUTES --------------------
 @app.route("/")
@@ -227,7 +236,7 @@ def forgot_password():
         c.execute("UPDATE users SET reset_token=? WHERE email=?", (token,email))
         conn.commit()
         conn.close()
-        print(f"[RESET TOKEN] {token}")  # Simulate sending token via email
+        print(f"[RESET TOKEN] {token}")
         flash("Reset token generated. Check console.", "info")
     return render_template("forgot_password.html")
 
@@ -262,19 +271,8 @@ def run_script():
         if not script_name or not code:
             flash("Script name and code are required", "danger")
             return render_template("run_script.html")
-        output,error,success_log,success_code = "","","",""
-        stdout, stderr = run_node_runner(code)
-        try:
-            data = json.loads(stdout) if stdout else {}
-            logs = "\n".join(data.get("logs",[])) if isinstance(data,dict) else ""
-            final = str(data.get("result","")) if isinstance(data,dict) else ""
-            output = logs + ("\n"+final if final else "")
-            if not stderr:
-                success_log = "Script executed successfully"
-                success_code = "200"
-        except Exception:
-            output = stdout
-            error = stderr
+        result = run_node_runner(code)
+        output, error, success_log, success_code = process_script_result(result)
         store_script_record(script_name, code, output, error, success_log, success_code, run_type, session["user"], "paused")
         flash("Script saved", "success")
         return redirect(url_for("history"))
@@ -347,7 +345,45 @@ def get_logs(script_id):
     rows = query_db(f"SELECT {log_type},timestamp FROM scripts WHERE id=? AND user=?", (script_id, session["user"]))
     return jsonify([(row[0] if row[0] else "", row[1]) for row in rows])
 
+# -------------------- NPM FEATURES --------------------
+@app.route("/install_lib", methods=["POST"])
+def install_lib():
+    package = request.form.get("package")
+    if not package:
+        return jsonify({"error": "No package specified"}), 400
+    try:
+        result = subprocess.run(
+            [NPM_PATH, "install", package, "--no-audit", "--no-fund"],
+            cwd=os.path.dirname(__file__),
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+        return jsonify({
+            "output": result.stdout,
+            "error": result.stderr,
+            "status": "success" if result.returncode == 0 else "failed"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "failed"}), 500
+
+@app.route("/list_libs", methods=["GET"])
+def list_libs():
+    try:
+        result = subprocess.run(
+            [NPM_PATH, "list", "--depth=0", "--json"],
+            cwd=os.path.dirname(__file__),
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        packages = json.loads(result.stdout).get("dependencies", {})
+        return jsonify(packages)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # -------------------- RUN APP --------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)), debug=True)
+
 

@@ -1,30 +1,36 @@
+let input = "";
+process.stdin.setEncoding("utf-8");
 
-// runner.js
-// Minimal Node.js runner for Flask app
+process.stdin.on("data", chunk => input += chunk);
 
-const vm = require("vm");
+process.stdin.on("end", () => {
+  try {
+    let logs = [];
+    const originalLog = console.log;
 
-// Get code from command line
-const code = process.argv[2] || "";
+    // Capture console.log outputs
+    console.log = (...args) => {
+      logs.push(args.join(" "));
+      originalLog.apply(console, args);
+    };
 
-let logs = [];
-let result = null;
+    let result = eval(input);
 
-// Override console.log to capture logs
-const sandbox = {
-    console: {
-        log: (...args) => logs.push(args.join(" "))
-    }
-};
+    // Restore console.log
+    console.log = originalLog;
 
-try {
-    const script = new vm.Script(code);
-    const context = new vm.createContext(sandbox);
-    result = script.runInContext(context);
-} catch (err) {
-    console.error(err.toString());
-    process.exit(1);
-}
+    process.stdout.write(JSON.stringify({
+      output: logs.join("\n") || (result !== undefined ? result.toString() : ""),
+      error: "NO Error",
+      success: true
+    }));
+  } catch (err) {
+    process.stdout.write(JSON.stringify({
+      output: "Please Check The Error Log",
+      error: err.message,
+      success: false
+    }));
+  }
+});
 
-// Output JSON
-console.log(JSON.stringify({ logs, result }));
+

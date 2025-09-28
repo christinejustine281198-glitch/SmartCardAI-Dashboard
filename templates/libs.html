@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Installed Node modules</h3>
+{% if libs %}
+<table class="table table-sm">
+  <thead><tr><th>Package</th><th>Version</th></tr></thead>
+  <tbody>
+    {% for name, ver in libs.items() %}
+      <tr><td>{{ name }}</td><td>{{ ver }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No modules installed.</p>
+{% endif %}
+<a href="{{ url_for('history') }}" class="btn btn-link">Back</a>
+{% endblock %}
