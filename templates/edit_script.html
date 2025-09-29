@@ -7,12 +7,15 @@
 <body class="p-4">
 <h2>Edit Script: {{ script[1] }}</h2>
 <form method="POST">
-    <div class="mb-3">
-        <label for="code" class="form-label">Script Code</label>
-        <textarea name="code" id="code" class="form-control" rows="15">{{ script[2] }}</textarea>
-    </div>
-    <button type="submit" class="btn btn-primary">Save Changes</button>
-    <a href="{{ url_for('history') }}" class="btn btn-secondary">Back</a>
+    <label>Script Name:</label><br>
+    <input type="text" name="script_name" value="{{ script.name }}" required><br><br>
+
+    <label>Script Code:</label><br>
+    <textarea name="code" rows="15" cols="80">{{ script.code }}</textarea><br><br>
+
+    <button type="submit">Save Changes</button>
+    <a href="{{ url_for('history') }}">Back</a>
 </form>
+
 </body>
 </html>

@@ -347,20 +347,36 @@ def delete_script(script_id):
 def edit_script(script_id):
     if "user" not in session:
         return redirect(url_for("login"))
-    script = query_db("SELECT id,name,code FROM scripts WHERE id=? AND user=?", (script_id, session["user"]), one=True)
-    if not script:
+
+    row = query_db(
+        "SELECT id, name, code FROM scripts WHERE id=? AND user=?", 
+        (script_id, session["user"]), 
+        one=True
+    )
+    if not row:
         flash("Script not found", "danger")
         return redirect(url_for("history"))
-    if request.method=="POST":
-        name = request.form.get("script_name","").strip()
-        code = request.form.get("code","")
-        if not name or not code:
-            flash("Name and code required", "danger")
-            return render_template("edit_script.html", script=script)
-        query_db("UPDATE scripts SET name=?, code=? WHERE id=? AND user=?", (name, code, script_id, session["user"]))
-        flash("Script updated", "success")
+
+    # Convert tuple/row to dictionary for consistency
+    script = {"id": row[0], "name": row[1], "code": row[2]}
+
+    if request.method == "POST":
+        name = request.form.get("script_name", "").strip()
+        code = request.form.get("code", "")
+
+        if not name:
+            flash("Script name is required", "danger")
+            return render_template("edit_script.html", script={"id": script_id, "name": name, "code": code})
+
+        query_db(
+            "UPDATE scripts SET name=?, code=? WHERE id=? AND user=?", 
+            (name, code, script_id, session["user"])
+        )
+        flash("Script updated successfully", "success")
         return redirect(url_for("history"))
+
     return render_template("edit_script.html", script=script)
+
 
 # -------------------- HOME --------------------
 @app.route("/")
